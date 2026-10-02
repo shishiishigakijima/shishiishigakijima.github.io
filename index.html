@@ -1167,7 +1167,7 @@ dialog.dlg-choose{width:min(300px,calc(100% - 96px))}dialog.dlg-choose .lead{mar
   FB.db=db;
   FB.ready=()=>new Promise(res=>{if(!ok)return res(null);const off=FB.auth.onAuthStateChanged(u=>{off();res(u);});});
   FB.login=async()=>{const p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({prompt:"select_account"});
-    try{await FB.auth.signInWithPopup(p);}catch(e){if(/popup|operation-not-supported/i.test((e&&e.code)||""))await FB.auth.signInWithRedirect(p);else throw e;}};
+    await FB.auth.signInWithPopup(p);};
   FB.logout=()=>FB.auth.signOut();
   /* 利用者の確認：members に登録があればその権限。無くても読めるなら最初の管理者（ルールに書かれた人） */
   FB.member=async u=>{const em=String(u.email||"").toLowerCase();
@@ -1175,6 +1175,9 @@ dialog.dlg-choose{width:min(300px,calc(100% - 96px))}dialog.dlg-choose .lead{mar
     try{await FB.fs.doc("config/main").get();return{role:"admin",email:em,owner:true};}catch(e){return null;}};
   const downloads={save:async({filename,data})=>{const b=new Blob([data],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}};
   window.FB=FB;
+  /* LINEなどのアプリ内ブラウザではGoogleログインができないので、普通のブラウザで開き直す */
+  try{const ua=navigator.userAgent||"";if(/\bLine\//i.test(ua)&&!/openExternalBrowser=1/.test(location.search)){location.replace(location.pathname+"?openExternalBrowser=1"+location.hash);}}catch(e){}
+  FB.inApp=/\bLine\/|FBAN|FBAV|Instagram|; wv\)/i.test(navigator.userAgent||"");
   window.claude={use:async n=>n==="db"?db:n==="downloads"?downloads:null};
 })();
 </script>
@@ -2354,7 +2357,7 @@ function importBar(){
   if(S.imp.msg)txt=`${pct!=null?`<b class="pct num">${pct}%</b> `:""}<b>${esc(S.imp.msg)}</b>${pct!=null?`<span class="pbar"><i style="width:${pct}%"></i></span>`:""}`;
   else if(S.imp.err)txt=esc(S.imp.err);
   else{const la=S.index.lastAuto;const at=Math.max(lr?Number(lr.at)||0:0,la?Number(la.at)||0:0);
-    txt=at?`メール取込 <b>${new Date(at).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</b>${la&&Number(la.at)>=at?"（毎時の自動取込）":auto?"・この端末で自動取込中":""}`:"メールからの取込はまだ行われていません";}
+    txt=at?`メール取込 <b>${new Date(at).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</b>${la&&Number(la.at)>=at?"（自動取込）":auto?"・この端末で自動取込中":""}`:"メールからの取込はまだ行われていません";}
   if(f&&isAdmin())txt+=`<br><a href="#" data-act="goSettings">読み取れないメール ${f}件</a>`;
   txt+=` <span class="small">（${APP_VER}）</span>`;
   return`<div class="card import-bar ${S.imp.err?"err":""}"><div class="txt">${txt}</div>${S.mcp&&isAdmin()?`<button class="btn ghost sm" data-act="importNow" ${S.imp.running?"disabled":""}>今すぐ取込</button>`:""}</div>`;
@@ -3061,7 +3064,7 @@ function renderSheet(){
   liveSheet();
   if(S.sheet==="search"&&wasHidden){const i=$("#srchIn");if(i)setTimeout(()=>i.focus(),50);loadSearch();setupImgImp();}
 }
-function viewSearch(){return`<div class="srch-box"><input id="srchIn" type="search" placeholder="名前・電話番号・予約番号・ホテル" autocomplete="off" value="${esc(S.srchQ||"")}"><span class="img-btn" id="imgBtn" hidden title="スクリーンショットから予約を読み取る"><span aria-hidden="true">＋</span><input type="file" id="imgIn" accept="image/*" multiple aria-label="スクリーンショットから予約を読み取る"></span></div><div id="imgRes"></div><div id="srchRes">${S.srchData?"":`<div class="small" style="padding:8px">予約を読み込んでいます…</div>`}</div>`;}
+function viewSearch(){return`<div class="srch-box"><input id="srchIn" type="search" placeholder="名前・電話番号・予約番号・ホテル" autocomplete="off" value="${esc(S.srchQ||"")}"><span class="img-btn" id="imgBtn" title="スクリーンショットから予約を読み取る"><span aria-hidden="true">＋</span><input type="file" id="imgIn" accept="image/*" multiple aria-label="スクリーンショットから予約を読み取る"></span></div><div id="imgRes"><p class="small img-hint">＋：予約サイトの管理画面のスクショ（予約番号が写っているもの）を選ぶと、5分ほどで自動で読み取って送迎先・サイズを反映します</p></div><div id="srchRes">${S.srchData?"":`<div class="small" style="padding:8px">予約を読み込んでいます…</div>`}</div>`;}
 /* ===== スクショから予約を読み取る（検索画面の📷） ===== */
 const SITE2SRC={"じゃらん":"jalan","VELTRA":"veltra","ベルトラ":"veltra","ActivityJapan":"aj","アクティビティジャパン":"aj","アソビュー":"asoview","しまたび":"shimatabi","沖縄トリップ":"okitrip","FunNOW":"funnow"};
 async function takeImages(all){const box=$("#imgRes");all=[...all].filter(f=>f&&/^image\//.test(f.type||"image/"));if(!all.length)return;
@@ -3081,14 +3084,14 @@ async function queueShots(files){S.shotsOpen=true;const box=$("#imgRes");if(!S.d
   for(const f of files){try{const img=await shrinkImage(f);const id="s"+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
       await S.db.doc("shots/"+id).set({img,at:Date.now(),by:S.me||"",status:"pending",name:String(f.name||"").slice(0,60)});n++;}catch(e){bad++;}}
   S.shotsAt=0;await loadShots();
-  const head=n?`<div class="img-card"><div class="img-h">✓ ${n}枚を受け付けました</div><div class="small" id="shotRunMsg" style="line-height:1.6">Claude に読み取りを頼んでいます…</div></div>`:"";
+  const head=n?`<div class="img-card"><div class="img-h">✓ ${n}枚を受け付けました</div><div class="small" id="shotRunMsg" style="line-height:1.6">5分ほどで自動で読み取り、予約に反映します…</div></div>`:"";
   if(box)box.innerHTML=head+(bad?`<div class="img-card err">${bad}枚は画像を読み込めませんでした（別の形式・小さめの画像でお試しください）</div>`:"")+`<div id="shotList">${shotsHtml()}</div>`;
   if(n)fireShotRun();}
 /** 預けたらすぐ読み取り: 定期取込（スケジュール実行）をその場で起動する。起動できない人・画面では次の定期取込で処理 */
 const SHOT_TRIG="trig_01Wv3XmA1hEv8TgSGex3TEy7",CCR="Claude Code Remote";
 async function fireShotRun(){const msg=t=>{const e=$("#shotRunMsg");if(e)e.innerHTML=t;};
   const later="次の定期取込（毎時・6〜22時）で Claude が読み取り、反映します。";
-  if(!S.mcp){msg("この画面ではすぐの読み取りを始められません。"+later);return;}
+  if(!S.mcp){msg("5分ほどで自動で読み取り、送迎先・サイズを予約に反映します。下の一覧が「反映済み」に変わります（この画面を閉じても進みます）。");return;}
   try{const r=await S.db.doc("shotrun/main").get();const last=r.exists?Number(r.data().at)||0:0;
     if(Date.now()-last<4*60000){msg("Claude が読み取り中です（まとめて処理します）。数分で下の一覧が「反映済み」に変わります。");return;}}catch(e){}
   try{await S.mcp.callTool(CCR,"fire_trigger",{trigger_id:SHOT_TRIG,text:"ボードの＋からスクショが預けられました。手順0（shots の pending）を最初に処理してください。メールの取込も通常どおり行ってください。"});
@@ -3102,7 +3105,7 @@ function shotsHtml(){const l=(S.shots||[]).slice(0,8);if(!l.length)return"";cons
   if(!S.shotsOpen)return`<button class="img-card img-hist" data-act="shotsTg" aria-expanded="false"><span class="img-h" style="margin:0">履歴 <span class="small">${l.length}件 ▼</span></span></button>`;
   return`<div class="img-card"><button class="img-h img-hist-h" data-act="shotsTg" aria-expanded="true">履歴 <span class="small">（過去3日） ▲</span></button>${l.map(x=>{const t=new Date(x.at);return`<div class="img-row"><div class="grow"><b class="ty-${x.status==="done"?"add":x.status==="error"?"cancel":"edit"}">${esc(T[x.status]||x.status)}</b> <span class="small">${pad(t.getMonth()+1)}/${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}${x.by?" ・"+esc(staffName(x.by)):""}</span>${x.result?`<div class="small">${esc(x.result)}</div>`:""}</div>${x.status==="pending"?`<button class="lb-snz" data-act="shotDel" data-id="${esc(x.id)}">取り消す</button>`:""}</div>`;}).join("")}</div>`;}
 function imgHelp(kind){const b=$("#imgRes");if(!b)return;
-  b.innerHTML=`<div class="img-card err"><b>${kind==="paste"?"画像として貼り付けられませんでした。":"写真の選択画面が開きませんでした。"}</b><div class="small" style="color:var(--ink);margin-top:4px;line-height:1.6">${kind==="paste"?"右の＋からスクショを選んでください。":"Claude アプリの中では写真を選べないことがあります。スマホの Chrome などで claude.ai を開いて＋を押すか、Claude とのチャットにスクショを送って「反映して」と頼んでください。"}</div></div>`;}
+  b.innerHTML=`<div class="img-card err"><b>${kind==="paste"?"画像として貼り付けられませんでした。":"写真の選択画面が開きませんでした。"}</b><div class="small" style="color:var(--ink);margin-top:4px;line-height:1.6">${kind==="paste"?"右の＋からスクショを選んでください。":"もう一度＋を押してください。開かないときは、スマホの Chrome で開き直してください。"}</div></div>`;}
 async function setupImgImp(){const inp=$("#imgIn");if(!inp)return;
   loadShots().then(()=>{const b=$("#imgRes");if(b&&!b.querySelector(".img-card")&&!$("#shotList")&&(S.shots||[]).length)b.insertAdjacentHTML("beforeend",`<div id="shotList">${shotsHtml()}</div>`);});
   if(S.db&&!S.unsubShots){try{S.unsubShots=S.db.collection("shots").where("at",">=",Date.now()-3*86400000).onSnapshot(sn=>{S.shots=sn.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.at-a.at);S.shotsAt=Date.now();const el=$("#shotList");if(el)el.innerHTML=shotsHtml();},()=>{});}catch(e){}}
@@ -3833,7 +3836,7 @@ document.addEventListener("click",async ev=>{
     case"shotsTg":{S.shotsOpen=!S.shotsOpen;const sl=$("#shotList");if(sl)sl.innerHTML=shotsHtml();break;}
     case"shotDel":{try{await S.db.doc("shots/"+el.dataset.id).delete();S.shotsAt=0;await loadShots();const b=$("#imgRes");if(b){const sl=$("#shotList");if(sl)sl.innerHTML=shotsHtml();}toast("取り消しました");}catch(e){toast("取り消せませんでした");}break;}
     case"imgStop":S.imgCtl&&S.imgCtl.abort();break;
-    case"fbLogin":{try{await window.FB.login();location.reload();}catch(e){toast("ログインできませんでした（"+((e&&e.code)||"")+"）");}break;}
+    case"fbLogin":{try{await window.FB.login();location.reload();}catch(e){const c=String((e&&e.code)||"");toast(/popup-closed|cancelled-popup/.test(c)?"ログインを中止しました":/popup-blocked/.test(c)?"ポップアップが止められました。もう一度押してください":/operation-not-supported|web-storage|internal/.test(c)?"このブラウザではログインできません。Chromeで開いてください":"ログインできませんでした（"+c+"）");}break;}
     case"fbLogout":{try{await window.FB.logout();}catch(e){}location.reload();break;}
     case"memAdd":{if(!isAdmin())break;const em=($("#memEmail").value||"").trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){toast("メールアドレスを確認してください");break;}
       const sid=$("#memSid").value,role=$("#memRole").value;try{await S.db.doc("members/"+em).set({role,sid,at:Date.now(),by:S.email||""});toast(em+" を登録しました");$("#memEmail").value="";}catch(e){reportErr(e);}break;}
@@ -3976,7 +3979,7 @@ async function processJoins(){
   }}catch(e){}finally{S.joinBusy=false;}}
 const NOT_SHARED_MSG="このアカウントは、まだボードの共有メンバーに入っていません。ゆきに、ボード右上の「共有」からあなたのメールアドレスを追加してもらってください（スタッフは「操作可能」、よしは「編集可」）。追加されたあと、もう一度この招待URLを開いてください。";
 function lockView(){
-  if(S.lockMode==="login")return`<div class="lock"><div class="lock-card"><div class="lock-ic" aria-hidden="true">🌊</div><h2>SHISHI業務管理</h2><p>登録されたGoogleアカウントでログインしてください。</p><button class="btn main" data-act="fbLogin" style="margin-top:14px;padding:12px 22px;font-size:16px">Googleでログイン</button></div></div>`;
+  if(S.lockMode==="login")return`<div class="lock"><div class="lock-card"><div class="lock-ic" aria-hidden="true">🌊</div><h2>SHISHI業務管理</h2><p>登録されたGoogleアカウントでログインしてください。</p>${window.FB&&window.FB.inApp?'<p class="small" style="color:#b45309;margin-top:8px">アプリの中のブラウザではログインできません。右上の「︙」から「ブラウザで開く」（Chrome）を選んでください。</p>':''}<button class="btn main" data-act="fbLogin" style="margin-top:14px;padding:12px 22px;font-size:16px">Googleでログイン</button></div></div>`;
   return`<div class="lock"><div class="lock-card"><div class="lock-ic" aria-hidden="true">🔒</div><h2>このボードは登録制です</h2><p>${esc(S.lockMsg||"")}</p>${S.lockMode==="out"?`<button class="btn ghost" data-act="fbLogout" style="margin-top:14px">別のアカウントでログイン</button>`:""}</div></div>`;}
 function aclView(){
   if(!isAdmin())return"";const l=(S.members||[]).slice().sort((a,b)=>(a.role==="admin"?0:1)-(b.role==="admin"?0:1)||String(a.id).localeCompare(b.id));
