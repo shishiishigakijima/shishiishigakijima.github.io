@@ -949,6 +949,9 @@ dd.share-t{margin:0}
 .pax-in{flex-wrap:wrap}
 .stat b small{font-size:11px;font-weight:600;margin-left:1px}
 .pc-stat b{color:#C9693A}
+.if-stat b{color:#C44}.if-stat.on{border-color:#EBB4AC;background:#FFF4F2}
+.chip.miss{background:#FDECEC;color:#C44;margin-left:2px}
+.if-note{font-size:11.5px;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--line)}
 .pc-sum{padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px}.pc-sum b{font-size:16px;margin:0 4px}.pc-sum .neg{color:#C44}.pc-sum .pos{color:#1F8A55}
 .fl-row.is-stop{opacity:.55}.fl-row.is-stop .fl-main b{text-decoration:line-through}
 .stop-as{display:flex;flex-direction:column;align-items:center;justify-content:center}
@@ -2362,6 +2365,12 @@ function importBar(){
   txt+=` <span class="small">（${APP_VER}）</span>`;
   return`<div class="card import-bar ${S.imp.err?"err":""}"><div class="txt">${txt}</div>${S.mcp&&isAdmin()?`<button class="btn ghost sm" data-act="importNow" ${S.imp.running?"disabled":""}>今すぐ取込</button>`:""}</div>`;
 }
+/* メールから分からなかった項目：サイズ（星空以外）・送迎先（アクティビティジャパンは載らない／「場所未記入」）・料金 */
+function infoMiss(b){const m=[];const has=v=>String(v??"").trim()!==""&&String(v)!=="0";
+  if(!/星空/.test(b.plan||"")&&!has(b.sizes))m.push("サイズ");
+  if((b.source==="aj"&&!has(b.pickup)&&!has(bkCar(b)))||/未記入/.test(b.pickup||""))m.push("送迎");
+  if(b.source!=="manual"&&!has(b.price)&&!has(b.priceNew))m.push("料金");
+  return m;}
 function viewBook(){
   const bks=liveBookings(S.day);
   const live=bks.filter(b=>b.status!=="cancel"&&!b.stopped);
@@ -2373,11 +2382,13 @@ function viewBook(){
   /* 予約サイト側で料金を直したら「済」→ 金額変更の一覧から外す（変更後の料金がまた変わったら再表示） */
   const pcDone=b=>b.priceDone!=null&&String(b.priceDone)===String(b.priceNew);
   const pch=live.filter(b=>b.priceNew!==undefined&&b.priceNew!==""&&String(b.priceNew)!==String(b.price??"")&&!pcDone(b)).sort((a,b)=>(tourStart(a)||"").localeCompare(tourStart(b)||""));
-  let h=importBar()+`<div class="stats s4"><div class="stat"><b class="num">${live.length}<small>組</small></b><span>参加 ${pax}名</span></div><button class="stat cx-stat pc-stat ${S.openPc?"on":""}" data-act="togglePc" aria-expanded="${!!S.openPc}" ${pch.length?"":"disabled"}><b class="num">${pch.length}</b><span>金額変更${pch.length?(S.openPc?" ▲":" ▼"):""}</span></button><button class="stat cx-stat st-stat ${S.openStop?"on":""}" data-act="toggleStop" aria-expanded="${!!S.openStop}" ${stp.length?"":"disabled"}><b class="num">${stN}</b><span>催行中止${stD?`<small class="st-dn">済${stD}</small>`:""}${stp.length?(S.openStop?" ▲":" ▼"):""}</span></button><button class="stat cx-stat ${S.openCx?"on":""}" data-act="toggleCx" aria-expanded="${!!S.openCx}" ${cx.length?"":"disabled"}><b class="num">${cx.length}</b><span>キャンセル${cx.length?(S.openCx?" ▲":" ▼"):""}</span></button></div>`;
+  const inf=live.filter(b=>{const m=infoMiss(b);return m.length&&b.infoOk!==m.join("・");}).sort((a,b)=>(tourStart(a)||"").localeCompare(tourStart(b)||""));
+  let h=importBar()+`<div class="stats s4"><button class="stat cx-stat if-stat ${S.openInfo?"on":""}" data-act="toggleInfo" aria-expanded="${!!S.openInfo}" ${inf.length?"":"disabled"}><b class="num">${inf.length}</b><span>要確認${inf.length?(S.openInfo?" ▲":" ▼"):""}</span></button><button class="stat cx-stat pc-stat ${S.openPc?"on":""}" data-act="togglePc" aria-expanded="${!!S.openPc}" ${pch.length?"":"disabled"}><b class="num">${pch.length}</b><span>金額変更${pch.length?(S.openPc?" ▲":" ▼"):""}</span></button><button class="stat cx-stat st-stat ${S.openStop?"on":""}" data-act="toggleStop" aria-expanded="${!!S.openStop}" ${stp.length?"":"disabled"}><b class="num">${stN}</b><span>催行中止${stD?`<small class="st-dn">済${stD}</small>`:""}${stp.length?(S.openStop?" ▲":" ▼"):""}</span></button><button class="stat cx-stat ${S.openCx?"on":""}" data-act="toggleCx" aria-expanded="${!!S.openCx}" ${cx.length?"":"disabled"}><b class="num">${cx.length}</b><span>キャンセル${cx.length?(S.openCx?" ▲":" ▼"):""}</span></button></div>`;
   if(S.openStop&&stp.length){const gs={};stp.forEach(b=>{const k=(b.time||"")+"|"+(b.plan||"未分類");(gs[k]=gs[k]||[]).push(b);});
     h+=`<div class="card cx-list st-list">${Object.entries(gs).map(([k,l])=>{const[t,pl]=k.split("|");return`<div class="st-gh c-${planColor(pl)}"><span class="st-t num">${esc(hmShort(t))}</span><b>${esc(pl)}</b><span class="st-n">${l.length}組・${l.reduce((s,b)=>s+(Number(b.pax)||0),0)}名</span><button class="vm-c" data-act="bulkResume" data-plan="${esc(pl)}" data-time="${esc(t)}">まとめて戻す</button></div>`+l.slice().sort((a,b)=>(a.stopDone?1:0)-(b.stopDone?1:0)).map(b=>stRow(b)).join("");}).join("")}</div>`;}
   if(S.openPc&&pch.length){const num=v=>Number(String(v??"").replace(/[^\d]/g,""))||0;const tot=pch.reduce((t,b)=>t+(num(b.priceNew)-num(b.price)),0);
     h+=`<div class="card cx-list pc-list"><div class="pc-sum">差額の合計 <b class="num ${tot<0?"neg":"pos"}">${tot<0?"−":"+"}${esc(yen(Math.abs(tot)))}</b><span class="small">（${tot<0?"返金・減額":"追加で集金"}）</span></div>${pch.map(b=>{const d=num(b.priceNew)-num(b.price);return`<div class="rrow"><button class="row" data-act="detail" data-id="${esc(b.id)}"><div class="main"><div class="nm">${esc(hmShort(tourStart(b)))} ${esc(isLegStop(b)?"青(セット)":planLabel(b.plan))}・${esc(dispName(b))}${isLegStop(b)?` <span class="chip intl">青のみ</span>`:""}</div><div class="mt"><span class="chip src">${esc(SRC_LABEL[b.source]||"")}</span>${esc(yen(b.price)||"—")}→<b class="${isLocalPay(b)?"pay-local":""}">${esc(yen(b.priceNew))}</b>${b.priceNote?`<span class="ta-x" style="padding-left:0">${esc(b.priceNote)}</span>`:""}</div></div><span class="chev">›</span></button><button class="pc-done" data-act="pcDone" data-id="${esc(b.id)}" title="予約サイトの料金を変更したら押す"><span class="ck"></span>済</button></div>`;}).join("")}</div>`;}
+  if(S.openInfo&&inf.length)h+=`<div class="card cx-list if-list"><div class="if-note">予約メールに書かれていなかった項目です。管理画面のスクショ（検索の＋）か「編集」で入れてください。確認して不要なら「済」。</div>${inf.map(b=>`<div class="rrow"><button class="row" data-act="detail" data-id="${esc(b.id)}"><div class="main"><div class="nm">${esc(hmShort(tourStart(b)))} ${esc(planLabel(b.plan))}・${esc(dispName(b))}</div><div class="mt"><span class="chip src">${esc(SRC_LABEL[b.source]||"")}</span>${infoMiss(b).map(x=>`<span class="chip miss">${esc(x)}なし</span>`).join("")}</div></div><span class="chev">›</span></button><button class="pc-done" data-act="infoOk" data-id="${esc(b.id)}" title="確認したら押す"><span class="ck"></span>済</button></div>`).join("")}</div>`;
   if(S.openCx&&cx.length)h+=`<div class="card cx-list">${cx.map(b=>`<button class="row cxrow" data-act="detail" data-id="${esc(b.id)}"><div class="main">
       <div class="nm">${esc(hmShort(b.time))} ${esc(b.plan||"未分類")}・${esc(dispName(b))}</div>
       <div class="mt"><span class="chip src">${esc(SRC_LABEL[b.source]||"")}</span>${b.ref?"#"+esc(b.ref):""}${b.cancelledAt?` ・ ${esc(cxAt(b.cancelledAt))} キャンセル受付`:""}</div></div><span class="px num">${Number(b.pax)||0}</span><span class="chev">›</span></button>`).join("")}</div>`;
@@ -3858,6 +3869,8 @@ document.addEventListener("click",async ev=>{
     case"trpMove":{if(!isAdmin())break;const l=trPlaces().slice();const i=Number(el.dataset.i),j=i+Number(el.dataset.d);if(j<0||j>=l.length)break;[l[i],l[j]]=[l[j],l[i]];try{await patchConfig({trPlaces:l});}catch(e){}break;}
     case"dupTg":{if(!isAdmin())break;const on=S.config&&S.config.dupCheck===false;try{await patchConfig({dupCheck:on});toast(on?"重複チェックをオンにしました":"重複チェックをオフにしました");}catch(e){}break;}
     case"saveCap":{if(!isAdmin())break;const o={};document.querySelectorAll(".cap-in").forEach(x=>{const v=x.value.trim();if(v!=="")o[x.dataset.k]=Math.max(0,parseInt(v,10)||0);});try{await patchConfig({cap:o});if(document.activeElement)document.activeElement.blur();toast("在庫を保存しました");render();}catch(e){toast("保存できませんでした");}break;}
+    case"toggleInfo":S.openInfo=!S.openInfo;render();break;
+    case"infoOk":{const ob=getBk(id);if(!ob)break;const m=infoMiss(ob).join("・");try{await patchDay({bookings:{[id]:{infoOk:m,infoOkAt:Date.now(),infoOkBy:S.me||""}}});toast("済にしました");}catch(e){}break;}
     case"togglePc":S.openPc=!S.openPc;render();break;
     case"aiOne":el.disabled=true;await aiOne(id);break;
     case"aiAll":el.disabled=true;S.ai.off=false;await aiBackfill(true);break;
