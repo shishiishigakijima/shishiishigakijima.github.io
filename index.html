@@ -1193,7 +1193,7 @@ dialog.dlg-choose{width:min(300px,calc(100% - 96px))}dialog.dlg-choose .lead{mar
 <script>
 (function(){
 "use strict";
-const APP_VER="v203";
+const APP_VER="v205";
 const WD=["日","月","火","水","木","金","土"];
 const STATUS={booked:"予約済",arrived:"受付済",done:"完了",cancel:"キャンセル"};
 const SRC_LABEL={veltra:"VELTRA",asoview:"アソビュー",jalan:"じゃらん",aj:"ActivityJapan",shimatabi:"しまたび",okitrip:"沖縄トリップ",funnow:"FunNOW",manual:"直接",ai:"メール",rental:"レンタカー",gcal:"Googleカレンダー",shot:"スクショ"};
@@ -1663,6 +1663,7 @@ async function applyParsed(p,msg){
     const oldRaw=base.sizesRaw!=null?base.sizesRaw:base.sizes;
     const same=(p.emailNote||"")===(base.emailNote||"")&&(p.sizes||"")===(oldRaw||"")&&(!p.pickup||p.pickup===(base.pickupRaw!=null?base.pickupRaw:base.pickup));
     if(base.paxEdited){rec.pax=base.pax;}
+    if(base.mgFrom){rec.mgFrom=rec.plan&&rec.plan!=="マングローブ"?rec.plan:base.mgFrom;rec.plan="マングローブ";}
     if(base.timeEdited&&exist){rec.time=base.time;rec.endTime=base.endTime||"";}
     if(base.sizesEdited||(same&&base.ai&&base.ai.v>=1))rec.sizes=base.sizes;
     if(!same&&base.ai&&!base.ai.edited)rec.ai={v:0};
@@ -2133,7 +2134,10 @@ function blueTime(b){return isSet(b.plan)?(b.blueTime||addMin(b.time,blueOffset(
 function legStart(b,leg){if(!isSet(b.plan))return b.time||"";return((leg==="b")===!!b.blueFirst)?(b.time||""):blueTime(b);}
 function blueStart(b){return legStart(b,"b");}
 function isBF(b){return !!(b&&isSet(b.plan)&&b.blueFirst);}
-function legKey(b,leg){return tourKey(legStart(b,leg),b.plan||"未分類")+(leg==="b"?"_b":"")+(isBF(b)?"_f":"");}
+function isMgLeg(b){return !!(b&&isSet(b.plan)&&b.mgLeg&&!b.stopped&&!b.stopLeg);}
+function mgLegTag(b){return "マングローブ＋青（"+planShort(legName(b.plan))+"の代わり）";}
+function mgLegPrice(b){const P=prices();const m=P["マングローブ"],bl=P["青"];return Math.max(0,Number(b.pax)||0)*((m?m.u:5500)+(bl?bl.u:5500));}
+function legKey(b,leg){return tourKey(legStart(b,leg),leg!=="b"&&isMgLeg(b)?"マングローブ":(b.plan||"未分類"))+(leg==="b"?"_b":"")+(isBF(b)?"_f":"");}
 /** セットのうちカヤック/サップだけ中止（青は催行） */
 function isLegStop(b){return !!(b&&isSet(b.plan)&&b.stopLeg&&!b.stopped);}
 function legStopLabel(plan){return "青のみに変更";}
@@ -2141,7 +2145,7 @@ function legStopTag(plan){return "青のみ（"+planShort(legName(plan))+"中止
 /** 青のみにしたときの料金（青の単価×人数。青は2歳から参加できるので全員分） */
 function blueOnlyPrice(b){const P=prices()["青"];return Math.max(0,Number(b.pax)||0)*(P?P.u:5500);}
 function legStopPricePatch(b,on){const cur=b.priceNew!==undefined&&b.priceNew!=="";
-  if(on){if(cur&&b.priceAuto!=="leg")return{};return{priceNew:String(blueOnlyPrice(b)),priceNote:"青のみに変更（"+legName(b.plan)+"中止）",priceAuto:"leg"};}
+  if(on){if(cur&&!/^(leg|mg|mgleg)$/.test(b.priceAuto||""))return{};return{priceNew:String(blueOnlyPrice(b)),priceNote:"青のみに変更（"+legName(b.plan)+"中止）",priceAuto:"leg"};}
   return b.priceAuto==="leg"?{priceNew:"",priceNote:"",priceAuto:""}:{};}
 /** 実際にツアーが始まる時間（サップ中止で青だけなら青の時間） */
 function tourStart(b){return isLegStop(b)&&!b.blueFirst?blueTime(b):(b.time||"");}
@@ -2174,7 +2178,7 @@ function flowItems(){
   const addTour=(time,plan,name,b,leg,stop)=>{const bf=isBF(b)&&!!leg;const k=tourKey(time,plan)+(leg==="b"?"_b":"")+(bf?"_f":"");const g=(groups[k]=groups[k]||{type:"tour",key:k,time,plan,name,bf,label:name+(bf?"・青から":""),items:[],stops:[]});(stop?g.stops:g.items).push(b);};
   bks.forEach(b=>{
     const plan=b.plan||"未分類";
-    if(isSet(plan)){addTour(legStart(b,"a"),plan,planShort(legName(plan))+"(セット)",b,"a",isLegStop(b));addTour(legStart(b,"b"),plan,"青(セット)",b,"b");}
+    if(isSet(plan)){if(isMgLeg(b))addTour(legStart(b,"a"),"マングローブ","マングローブ(セット)",b,"a");else addTour(legStart(b,"a"),plan,planShort(legName(plan))+"(セット)",b,"a",isLegStop(b));addTour(legStart(b,"b"),plan,"青(セット)",b,"b");}
     else addTour(b.time||"",plan,planShort(plan),b,"");
     if(b.pickup){
       items.push({type:"pick",dir:"迎",key:"pk_"+safeKey(b.id),time:pickTime(b),auto:!b.pickupTime,b});
@@ -2261,8 +2265,8 @@ function capCheck(day){
     if(pl==="青")add("blue",b.time,px,b);
     else if(pl==="クリアカヤック")add("kayak",b.time,px-under3(b),b);
     else if(pl==="クリアサップ")add("sup",b.time,px-rideAlong(b),b);
-    else if(pl==="クリアカヤックセット"){if(!isLegStop(b))add("kayak",legStart(b,"a"),px-under3(b),b);add("blue",legStart(b,"b"),px,b);}
-    else if(pl==="クリアサップセット"){if(!isLegStop(b))add("sup",legStart(b,"a"),px-rideAlong(b),b);add("blue",legStart(b,"b"),px,b);}
+    else if(pl==="クリアカヤックセット"){if(!isLegStop(b)&&!isMgLeg(b))add("kayak",legStart(b,"a"),px-under3(b),b);add("blue",legStart(b,"b"),px,b);}
+    else if(pl==="クリアサップセット"){if(!isLegStop(b)&&!isMgLeg(b))add("sup",legStart(b,"a"),px-rideAlong(b),b);add("blue",legStart(b,"b"),px,b);}
     else if(pl==="マングローブ")add("mangrove",b.time,px,b);
     else if(pl==="星空")add("star",b.time,1,b);
     else if(pl==="サンセット"){const ty=sunType(b);if(ty==="kayak")add("ssKayak",b.time,px-under3(b),b);else if(ty==="sup")add("ssSup",b.time,px-rideAlong(b),b);else unk.push(b);}});
@@ -2427,7 +2431,7 @@ function viewBook(){
       h+=`<div class="card grp"><div class="grp-head"><span class="bulk-ts"><label class="vm-chk bulk-t" title="この時間をまとめて催行中止"><input type="checkbox" data-act="bulkStop" data-plan="${esc(p)}" data-time="${esc(t)}">催行中止</label>${isSet(p)?`<label class="vm-chk bulk-t" title="この時間の${esc(legName(p))}だけ中止（青は催行）"><input type="checkbox" data-act="bulkStopLeg" data-plan="${esc(p)}" data-time="${esc(t)}" ${ok.length&&ok.every(isLegStop)?"checked":""}>${esc(legStopLabel(p))}</label>`:""}</span><span class="t num">${esc(hmShort(t))}</span><span class="pl">${isSet(p)&&first&&ok.length&&ok.every(isLegStop)?`青 ${esc(hmShort(legStart(first,"b")))} のみ`:isSet(p)&&first?(bf?`青から → ${esc(legName(p))} ${esc(hmShort(blueTime(first)))}`:`${esc(legName(p))} → 青 ${esc(hmShort(blueTime(first)))}`):""}<span class="small" style="display:block;font-weight:400">${ok.length}組</span></span><span class="px num">${tp}<small style="font-size:12px;font-family:inherit">名</small></span></div>
         ${bulkAssignRow(p,t,ok)}
         ${isSet(p)&&ok.length&&ok.every(isLegStop)&&!splitOn?blueAssign(kB,"青(セット)"+hmShort(legStart(first,"b"))):splitOn?"":bf?blueAssign(kB,"青(セット)"+hmShort(t))+assignBtn(kA,hmShort(blueTime(first))+" "+planShort(legName(p))+"(セット)"):assignBtn(key,hmShort(t)+" "+(isSet(p)?planShort(legName(p))+"(セット)":p))}${!splitOn&&!bf&&isSet(p)&&first&&!ok.every(isLegStop)?blueAssign(kB,"青(セット)"+hmShort(blueTime(first))):""}
-        ${items.sort((a,b)=>(a.status==="cancel")-(b.status==="cancel")).map(b=>splitOn&&b.status!=="cancel"?`<div class="bk-split">${bookingRow(b)}${isLegStop(b)?"":assignBtn((isSet(p)?legKey(b,"a"):key)+"__"+safeKey(b.id),hmShort(legStart(b,"a"))+" "+(isSet(p)?planShort(legName(p))+"(セット)":p)+" "+dispName(b)).replace('<span class="lbl">担当</span>',`<span class="lbl">${isSet(p)?esc(planShort(legName(p)))+"の担当":"担当"}</span>`)}${isSet(p)?blueAssign(legKey(b,"b")+"__"+safeKey(b.id),"青(セット)"+hmShort(legStart(b,"b"))+" "+dispName(b)):""}</div>`:bookingRow(b)).join("")}</div>`;
+        ${items.sort((a,b)=>(a.status==="cancel")-(b.status==="cancel")).map(b=>splitOn&&b.status!=="cancel"?`<div class="bk-split">${bookingRow(b)}${isLegStop(b)?"":assignBtn((isSet(p)?legKey(b,"a"):key)+"__"+safeKey(b.id),hmShort(legStart(b,"a"))+" "+(isSet(p)?planShort(legName(p))+"(セット)":p)+" "+dispName(b)).replace('<span class="lbl">担当</span>',`<span class="lbl">${isMgLeg(b)?"マングローブの担当":isSet(p)?esc(planShort(legName(p)))+"の担当":"担当"}</span>`)}${isSet(p)?blueAssign(legKey(b,"b")+"__"+safeKey(b.id),"青(セット)"+hmShort(legStart(b,"b"))+" "+dispName(b)):""}</div>`:bookingRow(b)).join("")}</div>`;
     });
     h+=`</section>`;
   });
@@ -2438,8 +2442,13 @@ function viewBook(){
 }
 function isLocalPay(b){const p=String(b.payment||"");return /現地|現金|当日(払|支払|精算|決済)|店頭/.test(p)&&!/事前/.test(p);}
 const MEETS=["底地","米原","大崎"];
-function venueTag(b){return(b&&b.stopped?`<span class="venue">⛔催行中止</span>`:isLegStop(b)?`<span class="venue">⛔${esc(legStopTag(b.plan))}</span>`:"")+(b&&b.venueChg?`<span class="venue">📍変更〇${b.meet?" "+esc(b.meet):""}</span>`:"")+(b&&b.meetTChg?`<span class="venue">⏰集合変更${b.meetT?" "+esc(b.meetT):""}</span>`:"");}
-function chgLine(b){const c=[];
+function mgTag(b){return b&&b.mgFrom?"マングローブに変更（元："+planLabel(b.mgFrom)+"）":"";}
+function mgPrice(b){const P=prices()["マングローブ"];return Math.max(0,Number(b.pax)||0)*(P?P.u:5500);}
+function mgPricePatch(b,on){const cur=b.priceNew!==undefined&&b.priceNew!=="";
+  if(on){if(cur&&!/^(leg|mg|mgleg)$/.test(b.priceAuto||""))return{};return{priceNew:String(mgPrice(b)),priceNote:"マングローブに変更（元："+planLabel(b.plan)+"）",priceAuto:"mg"};}
+  return b.priceAuto==="mg"?{priceNew:"",priceNote:"",priceAuto:""}:{};}
+function venueTag(b){return(isMgLeg(b)?`<span class="venue">🌿${esc(mgLegTag(b))}</span>`:"")+(b&&b.mgFrom?`<span class="venue">🌿${esc(mgTag(b))}</span>`:"")+(b&&b.stopped?`<span class="venue">⛔催行中止</span>`:isLegStop(b)?`<span class="venue">⛔${esc(legStopTag(b.plan))}</span>`:"")+(b&&b.venueChg?`<span class="venue">📍変更〇${b.meet?" "+esc(b.meet):""}</span>`:"")+(b&&b.meetTChg?`<span class="venue">⏰集合変更${b.meetT?" "+esc(b.meetT):""}</span>`:"");}
+function chgLine(b){const c=[];if(isMgLeg(b))c.push(`<span class="cg stop">🌿${esc(mgLegTag(b))}</span>`);if(b.mgFrom)c.push(`<span class="cg stop">🌿${esc(mgTag(b))}</span>`);
   if(b.stopped)c.push(`<span class="cg stop">⛔催行中止</span>`);else if(isLegStop(b))c.push(`<span class="cg stop">⛔${esc(legStopTag(b.plan))}</span>`);
   if(isSet(b.plan)&&b.blueFirst)c.push(`<span class="cg">🔄青から</span>`);
   if(b.venueChg)c.push(`<span class="cg">📍変更〇${b.meet?" "+esc(b.meet):""}</span>`);
@@ -2450,7 +2459,7 @@ function chgLine(b){const c=[];
   return c.length?`<div class="chg-line">${c.join("")}</div>`:"";}
 function venueBox(b,id){const on=!!b.venueChg;const m=b.meet||"";const other=m&&!MEETS.includes(m);
   const chk=(act,v,l)=>`<label class="vm-chk ${v?"on":""}"><input type="checkbox" data-act="${act}" data-id="${esc(id)}" ${v?"checked":""}>${l}</label>`;
-  return`<div class="venue-mini ${on||b.meetTChg?"on":""}"><div class="vm-top">${chk("venueChk",on,"ポイント変更〇")}${chk("meetTChk",b.meetTChg,"集合時間変更")}${chk("stopChk",b.stopped,"催行中止")}${isSet(b.plan)?chk("stopLegChk",!!b.stopLeg&&!b.stopped,legStopLabel(b.plan))+chk("blueFirstChk",b.blueFirst,"青から開始"):""}</div>
+  return`<div class="venue-mini ${on||b.meetTChg?"on":""}"><div class="vm-top">${chk("venueChk",on,"ポイント変更〇")}${chk("meetTChk",b.meetTChg,"集合時間変更")}${chk("stopChk",b.stopped,"催行中止")}${b.mgFrom||b.plan!=="マングローブ"?chk("mgChk",!!b.mgFrom,"マングローブに変更"):""}${isSet(b.plan)?chk("stopLegChk",!!b.stopLeg&&!b.stopped,legStopLabel(b.plan))+chk("mgLegChk",isMgLeg(b),"マングローブ＋青")+chk("blueFirstChk",b.blueFirst,"青から開始"):""}</div>
   ${on?`<div class="vm-row"><span class="vm-ic">📍</span>${MEETS.map(x=>`<button type="button" class="vm-c ${m===x?"on":""}" data-act="venueSet" data-id="${esc(id)}" data-v="${x}">${x}</button>`).join("")}<input id="venueFree" data-id="${esc(id)}" value="${esc(other?m:"")}" placeholder="その他" maxlength="30"></div>`:""}
   ${b.meetTChg?`<div class="vm-row"><span class="vm-ic">⏰</span><input id="meetTFree" data-id="${esc(id)}" value="${esc(b.meetT||"")}" placeholder="例：9:40 川平湾P集合" maxlength="40"></div>`:""}</div>`;}
 function itemVenue(it){const all=it.bs||(it.b?[it.b]:(it.items||[]));const l=all.filter(b=>b&&b.venueChg);if(!l.length)return"";const many=all.length>1;
@@ -3266,7 +3275,7 @@ function detailDlg0(id){
   const b=getBk(id);if(!b){closeDlg();return;}
   const pt=b.pickup?`迎え ${hmShort(pickTime(b))}${b.pickupTime?"":"（目安）"} ／ 送り ${hmShort(dropTime(b))}${b.dropTime?"":"（目安）"}`:"";
   const next=b.status==="cancel"?`<button class="btn ghost" data-act="status" data-id="${esc(id)}" data-to="booked">予約を復活</button>`:"";
-  openDlg(`${venueBox(b,id)}<h3>${esc(dispName(b))} <span class="small" style="font-weight:400">${esc(b.name&&b.name!==dispName(b)?b.name:"")}</span></h3><p class="lead">${b.status==="cancel"?`<span class="chip cancel">キャンセル${b.cancelledAt?"（"+esc(cxAt(b.cancelledAt))+" 受付）":""}</span> `:""}${esc(mdw(S.date))} ${esc(hmShort(b.time||""))}${b.endTime?"〜"+esc(hmShort(b.endTime)):""}・${esc(b.plan||"未分類")}${isGlass(b)?"（グラスボート）":""}${isSet(b.plan)?`<br>${isLegStop(b)?`青 ${esc(hmShort(legStart(b,"b")))}`:b.blueFirst?`青 ${esc(hmShort(b.time))} → ${esc(legName(b.plan))} ${esc(hmShort(blueTime(b)))}`:`${esc(legName(b.plan))} ${esc(hmShort(b.time))} → 青 ${esc(hmShort(blueTime(b)))}`}${b.blueTime?"":"（目安）"}${isLegStop(b)?` ／ <b class="pay-local">${esc(legName(b.plan))}は中止</b>`:""}`:""}</p>
+  openDlg(`${venueBox(b,id)}<h3>${esc(dispName(b))} <span class="small" style="font-weight:400">${esc(b.name&&b.name!==dispName(b)?b.name:"")}</span></h3><p class="lead">${b.status==="cancel"?`<span class="chip cancel">キャンセル${b.cancelledAt?"（"+esc(cxAt(b.cancelledAt))+" 受付）":""}</span> `:""}${esc(mdw(S.date))} ${esc(hmShort(b.time||""))}${b.endTime?"〜"+esc(hmShort(b.endTime)):""}・${esc(b.plan||"未分類")}${isGlass(b)?"（グラスボート）":""}${isSet(b.plan)?`<br>${isLegStop(b)?`青 ${esc(hmShort(legStart(b,"b")))}`:b.blueFirst?`青 ${esc(hmShort(b.time))} → ${esc(isMgLeg(b)?"マングローブ":legName(b.plan))} ${esc(hmShort(blueTime(b)))}`:`${esc(isMgLeg(b)?"マングローブ":legName(b.plan))} ${esc(hmShort(b.time))} → 青 ${esc(hmShort(blueTime(b)))}`}${b.blueTime?"":"（目安）"}${isLegStop(b)?` ／ <b class="pay-local">${esc(legName(b.plan))}は中止</b>`:""}`:""}</p>
   ${b.reqPending&&b.status!=="cancel"?`<div class="req-banner"><div><b>📝 ${esc(SRC_LABEL[b.source]||"予約サイト")}の予約リクエスト（まだ確定していません）</b><span>管理画面でお客様に回答（承認）してください。回答したら右のボタンを押します。</span></div><button class="btn sm main" data-act="reqDone" data-id="${esc(id)}">回答した</button></div>`:""}
   ${b.stopped&&b.status!=="cancel"?`<div class="stop-banner"><div><b>⛔ 催行中止</b><span>催行中止の欄に入っています。ツアー・送迎から外れています。${b.stopDone?(b.stopDoneBy==="auto"?"（予約サイトのキャンセルメールを確認して自動で済）":"（予約サイト手続き済）"):""}</span></div><button class="btn sm" data-act="stopOff" data-id="${esc(id)}">催行に戻す</button></div>`:""}
   <dl class="kv">
@@ -3811,12 +3820,22 @@ document.addEventListener("click",async ev=>{
       try{await patchDay({bookings:{[id]:{meetTChg:true,meetT:v,updatedBy:S.me||""}}});logEdit(S.date,ob,id,{meetT:[ob.meetTChg?(ob.meetT||"変更あり"):"なし",v]});toast("集合時間："+v);{const bx=document.querySelector(".venue-mini");if(bx)bx.outerHTML=venueBox({...ob,meetTChg:true,meetT:v},id);}}catch(e){}break;}
     case"stopLegChk":{const ob=getBk(id);if(!ob)break;const on=el.checked;const lb=legStopLabel(ob.plan);
       const pp=legStopPricePatch(ob,on);const ch={stop:[ob.stopLeg?lb:"セット",on?lb:"セット"]};if(pp.priceNew!==undefined&&String(pp.priceNew)!==String(ob.priceNew??""))ch.price=[yen(ob.priceNew||ob.price)||"",pp.priceNew?yen(pp.priceNew):yen(ob.price)||""];
-      try{await patchDay({bookings:{[id]:{stopLeg:on,...(on?{stopped:false}:{}),...pp,updatedBy:S.me||""}}});logEdit(S.date,ob,id,ch);toast(on?"青のみに変更しました"+(pp.priceNew?"（料金 "+yen(pp.priceNew)+"）":""):"セットに戻しました");later(()=>detailDlg(id));}catch(e){}break;}
+      try{await patchDay({bookings:{[id]:{stopLeg:on,...(on?{stopped:false,mgLeg:false}:{}),...pp,updatedBy:S.me||""}}});logEdit(S.date,ob,id,ch);toast(on?"青のみに変更しました"+(pp.priceNew?"（料金 "+yen(pp.priceNew)+"）":""):"セットに戻しました");later(()=>detailDlg(id));}catch(e){}break;}
     case"bulkStopLeg":{const pl=el.dataset.plan,t=el.dataset.time,on=el.checked;const lb=legStopLabel(pl);
       const l=liveBookings(S.day).filter(b=>b.status!=="cancel"&&!b.stopped&&b.plan===pl&&(t===undefined||(b.time||"")===t)&&!!b.stopLeg!==on);
       if(!l.length)break;
       if(!await ask(on?`${t!==undefined?hmShort(t)+" ":""}${pl}${t!==undefined?"":"（全時間）"}の ${l.length}組 を「青のみ」に変更しますか？\n（${legName(pl)}は中止。変更後の料金に青の料金が入ります）`:`${t!==undefined?hmShort(t)+" ":""}${pl} の ${l.length}組 をセットに戻しますか？`)){el.checked=!on;break;}
       try{const pp={};l.forEach(b=>pp[b.id]={stopLeg:on,...legStopPricePatch(b,on),updatedBy:S.me||""});await patchDay({bookings:pp});l.forEach(b=>{const x=pp[b.id];const ch={stop:[on?"セット":lb,on?lb:"セット"]};if(x.priceNew!==undefined)ch.price=[yen(b.priceNew||b.price)||"",x.priceNew?yen(x.priceNew):yen(b.price)||""];logEdit(S.date,b,b.id,ch);});toast(l.length+"組を"+(on?"青のみに変更しました":"セットに戻しました"));}catch(e){el.checked=!on;}break;}
+    case"mgLegChk":{const ob=getBk(id);if(!ob)break;const on=el.checked;const cur=ob.priceNew!==undefined&&ob.priceNew!=="";
+      const pp=on?((cur&&!/^(leg|mg|mgleg)$/.test(ob.priceAuto||""))?{}:{priceNew:String(mgLegPrice(ob)),priceNote:"マングローブ＋青に変更（"+legName(ob.plan)+"の代わり）",priceAuto:"mgleg"}):(ob.priceAuto==="mgleg"?{priceNew:"",priceNote:"",priceAuto:""}:{});
+      const ch={stop:[isMgLeg(ob)?"マングローブ＋青":"セット",on?"マングローブ＋青":"セット"]};if(pp.priceNew!==undefined&&String(pp.priceNew)!==String(ob.priceNew??""))ch.price=[yen(ob.priceNew||ob.price)||"",pp.priceNew?yen(pp.priceNew):yen(ob.price)||""];
+      try{await patchDay({bookings:{[id]:{mgLeg:on,...(on?{stopped:false,stopLeg:false}:{}),...pp,updatedBy:S.me||""}}});logEdit(S.date,ob,id,ch);toast(on?"マングローブ＋青に変更しました"+(pp.priceNew?"（料金 "+yen(pp.priceNew)+"）":""):"セットに戻しました");later(()=>detailDlg(id));}catch(e){el.checked=!on;}break;}
+    case"mgChk":{const ob=getBk(id);if(!ob)break;const on=el.checked;
+      if(on&&ob.mgFrom)break;if(!on&&!ob.mgFrom)break;
+      const to=on?"マングローブ":ob.mgFrom;const pp=mgPricePatch(on?ob:{...ob,plan:ob.mgFrom},on);
+      const patch={plan:to,mgFrom:on?ob.plan:null,...(on?{stopped:false,stopLeg:false,mgLeg:false}:{}),...pp,updatedBy:S.me||""};
+      const ch={plan:[ob.plan,to]};if(pp.priceNew!==undefined&&String(pp.priceNew)!==String(ob.priceNew??""))ch.price=[yen(ob.priceNew||ob.price)||"",pp.priceNew?yen(pp.priceNew):yen(ob.price)||""];
+      try{await patchDay({bookings:{[id]:patch}});logEdit(S.date,ob,id,ch);toast(on?"マングローブに変更しました"+(pp.priceNew?"（料金 "+yen(pp.priceNew)+"）":""):planLabel(to)+"に戻しました");later(()=>detailDlg(id));}catch(e){el.checked=!on;}break;}
     case"stopChk":{const ob=getBk(id);if(!ob)break;const on=el.checked;try{await patchDay({bookings:{[id]:{stopped:on,...(on?{}:{stopDone:null}),updatedBy:S.me||""}}});logEdit(S.date,ob,id,{stop:[ob.stopped?"中止":"催行",on?"中止":"催行"]});{const bx=document.querySelector(".venue-mini");if(bx)bx.outerHTML=venueBox({...ob,stopped:on},id);}}catch(e){}break;}
     case"venueSet":case"venueFree":{const ob=getBk(id);if(!ob)break;const v=act==="venueSet"?el.dataset.v:($("#venueFree").value||"").trim();if(!v){toast("集合場所を入力してください");break;}
       try{await patchDay({bookings:{[id]:{venueChg:true,meet:v,updatedBy:S.me||""}}});logEdit(S.date,ob,id,{venue:[ob.venueChg?("変更〇"+(ob.meet?" "+ob.meet:"")):"なし","変更〇 "+v]});if(act==="venueSet"){const fi=$("#venueFree");if(fi)fi.value="";}toast("集合場所："+v);{const bx=document.querySelector(".venue-mini");if(bx)bx.outerHTML=venueBox({...ob,venueChg:true,meet:v},id);}}catch(e){}break;}
