@@ -1193,7 +1193,7 @@ dialog.dlg-choose{width:min(300px,calc(100% - 96px))}dialog.dlg-choose .lead{mar
 <script>
 (function(){
 "use strict";
-const APP_VER="v206";
+const APP_VER="v208";
 const WD=["日","月","火","水","木","金","土"];
 const STATUS={booked:"予約済",arrived:"受付済",done:"完了",cancel:"キャンセル"};
 const SRC_LABEL={veltra:"VELTRA",asoview:"アソビュー",jalan:"じゃらん",aj:"ActivityJapan",shimatabi:"しまたび",okitrip:"沖縄トリップ",funnow:"FunNOW",manual:"直接",ai:"メール",rental:"レンタカー",gcal:"Googleカレンダー",shot:"スクショ"};
@@ -1270,6 +1270,7 @@ function rentedCars(d){d=d||S.date;return new Set((S.rentals||[]).concat(S.rentP
 function freeRentalCars(d){const rc=rentedCars(d);return fleet().cars.filter(c=>!rc.has(c));}
 function carChoices(cur){const rc=rentedCars();const fr=freeRentalCars();const l=vehicles().filter(v=>!rc.has(v)||v===cur);fr.forEach(c=>{if(!l.includes(c))l.push(c);});if(cur&&!l.includes(cur))l.push(cur);return l;}
 function needsCar(key){return /^(pk_|dp_|r_|fr_)/.test(key||"");}
+const CAR_SEP="／";function carsOf(key){return carOf(key).split(CAR_SEP).map(x=>x.trim()).filter(Boolean);}
 function carOf(key){return(((S.day&&S.day.cars)||{})[key])||"";}
 function isToday(){return S.date===ymd(new Date());}
 function yen(v){if(v===""||v==null)return"";const n=Number(String(v).replace(/[^\d]/g,""));return isNaN(n)||!String(v).match(/\d/)?String(v):"¥"+n.toLocaleString("ja-JP");}
@@ -2220,9 +2221,9 @@ function carBar(){
   if(!S.day)return"";
   const asg=S.day.assign||{};const by={};let none=0;
   flowItems().forEach(it=>{
-    if(!needsCar(it.key))return;const c=carOf(it.key);
-    if(!c){none++;return;}
-    (by[c]=by[c]||[]).push(it);
+    if(!needsCar(it.key))return;const cs=carsOf(it.key);
+    if(!cs.length){none++;return;}
+    cs.forEach(c=>(by[c]=by[c]||[]).push(it));
   });
   const cars=carChoices().filter(v=>by[v]).concat(Object.keys(by).filter(v=>!carChoices().includes(v)));
   const fr=freeRentalCars().filter(c=>!by[c]);
@@ -2289,7 +2290,7 @@ function trOverlaps(){if(!S.day)return[];const items=flowItems().filter(it=>!it.
       const pair=[T.key,X.key].sort().join("|");
       const xs=A[X.key]||[];const shared=st.filter(id=>xs.includes(id));
       shared.forEach(id=>{const k="s|"+id+"|"+pair;if(seen.has(k))return;seen.add(k);out.push({t:[T.time,X.time].sort()[0],who:staffName(id),a:lab(T),b:lab(X)+(X.time!==T.time?" "+hmShort(X.time):"")});});
-      if(car&&carOf(X.key)===car){const k="c|"+car+"|"+pair;if(!seen.has(k)){seen.add(k);out.push({t:[T.time,X.time].sort()[0],who:car,a:lab(T),b:lab(X)+(X.time!==T.time?" "+hmShort(X.time):"")});}}});});
+      carsOf(T.key).filter(c=>carsOf(X.key).includes(c)).forEach(car=>{const k="c|"+car+"|"+pair;if(!seen.has(k)){seen.add(k);out.push({t:[T.time,X.time].sort()[0],who:car,a:lab(T),b:lab(X)+(X.time!==T.time?" "+hmShort(X.time):"")});}});});});
   return out.sort((x,y)=>x.t.localeCompare(y.t));}
 function trWarn(){const l=trOverlaps();if(!l.length)return"";return`<div class="cap-warn tr-warn">${l.map(x=>`<div>⚠ 重なり：${esc(hmShort(x.t))} ${esc(x.who)}（${esc(x.a)}／${esc(x.b)}）</div>`).join("")}</div>`;}
 function trSetEditor(){const pl=trPlaces();const dup=!(S.config&&S.config.dupCheck===false);
@@ -3465,20 +3466,26 @@ function carUses(exceptKey,time){
   // other uses of each car within ±59 min
   const out={};const t0=toMin(time);
   flowItems().forEach(it=>{
-    if(it.key===exceptKey)return;const c=carOf(it.key);if(!c)return;
+    if(it.key===exceptKey)return;const cs=carsOf(it.key);if(!cs.length)return;
     const t=toMin(it.time);if(t0!=null&&t!=null&&Math.abs(t-t0)>59)return;
-    (out[c]=out[c]||[]).push(hmShort(it.time)+(it.type==="pick"?it.dir:it.type==="rent"?"車":"")+(it.b?pickNames(it):it.r?surnameKana(it.r.name):""));
+    cs.forEach(c=>(out[c]=out[c]||[]).push(hmShort(it.time)+(it.type==="pick"?it.dir:it.type==="rent"?"車":"")+(it.b?pickNames(it):it.r?surnameKana(it.r.name):"")));
   });
   return out;
 }
+let carSeq=100;
+function selCars(n){return[...document.querySelectorAll('#dlgBody .tg.on[data-act="tgCar"]')].filter(x=>x.dataset.id).sort((a,b)=>Number(a.dataset.ord)-Number(b.dataset.ord)).map(x=>x.dataset.id).slice(0,n);}
+function carLimit(){return Math.max(1,document.querySelectorAll('#dlgBody .tg.on[data-act="tgStaff"]').length);}
+function carTrim(){const all=[...document.querySelectorAll('#dlgBody .tg[data-act="tgCar"]')];if(!all.length)return;const lim=carLimit();
+  const on=all.filter(x=>x.dataset.id&&x.classList.contains("on")).sort((a,b)=>Number(a.dataset.ord)-Number(b.dataset.ord));
+  on.slice(lim).forEach(x=>{x.classList.remove("on");x.setAttribute("aria-pressed","false");});}
 function assignDlg(key,label,time,keys){
   const cur=((S.day&&S.day.assign)||{})[key]||[];const off=(S.day&&S.day.off)||{};
-  const car=carOf(key);const uses=needsCar(key)?carUses(key,time):{};
+  const car=carOf(key);const cl=carsOf(key);const uses=needsCar(key)?carUses(key,time):{};
   openDlg(`<h3>${needsCar(key)?"担当と車を選ぶ":"担当を選ぶ"}</h3><p class="lead">${esc(label)}</p>
   <div class="small" style="margin-bottom:4px">担当（複数可）</div>
   <div class="chips">${staffList(false).map(s=>`<button type="button" class="tg ${cur.includes(s.id)?"on":""}" data-act="tgStaff" data-id="${s.id}" aria-pressed="${cur.includes(s.id)}">${esc(s.name)}${off[s.id]?`<small>休み</small>`:""}</button>`).join("")||`<span class="small">スタッフが未登録です</span>`}</div>
-  ${needsCar(key)?`<div class="small" style="margin:12px 0 4px">使う車</div><div class="chips">
-    ${carChoices(car).map(v=>`<button type="button" class="tg car ${v===car?"on":""}" data-act="tgCar" data-id="${esc(v)}" aria-pressed="${v===car}">${esc(v)}${uses[v]?`<small class="busy">使用 ${esc(uses[v].join("・"))}</small>`:""}</button>`).join("")}
+  ${needsCar(key)?`<div class="small" style="margin:12px 0 4px">使う車 <span id="carLim">（担当の人数まで選べます）</span></div><div class="chips">
+    ${[...new Set(carChoices(cl[0]).concat(cl))].map(v=>`<button type="button" class="tg car ${cl.includes(v)?"on":""}" data-act="tgCar" data-id="${esc(v)}" data-ord="${cl.indexOf(v)}" aria-pressed="${cl.includes(v)}">${esc(v)}${uses[v]?`<small class="busy">使用 ${esc(uses[v].join("・"))}</small>`:""}</button>`).join("")}
     <button type="button" class="tg ${car?"":"on"}" data-act="tgCar" data-id="" aria-pressed="${!car}">なし</button></div>`:""}
   <div class="dlg-actions"><button class="btn ghost" data-act="close">閉じる</button><button class="btn main" data-act="saveAssign" data-key="${esc(key)}" data-keys="${esc(keys||"")}">決定</button></div>`);
 }
@@ -3610,7 +3617,7 @@ function trChoose(){openDlg(`<h3>追加</h3><p class="lead">${esc(mdw(S.date))}<
 function trFromTo(f){if(f.from!=null||f.to!=null)return{from:f.from||"",to:f.to||""};return f.dir==="送"?{from:"",to:f.place||""}:{from:f.place||"",to:""};}
 function trForm(id){
   const f=id?(((S.day&&S.day.free)||{})[id]||{}):{};const key=id?"fr_"+id:"";const ft=trFromTo(f);
-  const cur=id?(((S.day&&S.day.assign)||{})[key]||[]):[];const car=id?carOf(key):"";const off=(S.day&&S.day.off)||{};
+  const cur=id?(((S.day&&S.day.assign)||{})[key]||[]):[];const car=id?carOf(key):"";const cl=id?carsOf(key):[];const off=(S.day&&S.day.off)||{};
   const sel=new Set(f.bks||[]);const bks=trBks();
   const plRow=(g,v)=>{const other=v&&!trPlaces().includes(v);
     return`<div class="tr-pls" id="trPl_${g}">${trPlaces().map(x=>`<button type="button" class="tr-pl ${v===x?"on":""}" data-act="trSel" data-g="${g}" data-v="${esc(x)}" aria-pressed="${v===x}">${esc(x)}</button>`).join("")}<button type="button" class="tr-pl ${other?"on":""}" data-act="trSel" data-g="${g}" data-v="その他" aria-pressed="${!!other}">その他</button></div>
@@ -3627,12 +3634,12 @@ function trForm(id){
     return`<select id="trH" class="tr-sel" aria-label="時"><option value="">--</option>${hs.map(h=>`<option value="${h}" ${h===h0?"selected":""}>${Number(h)}</option>`).join("")}</select><b>時</b>
     <select id="trM" class="tr-sel" aria-label="分"><option value="">--</option>${["00","10","20","30","40","50"].map(m=>`<option value="${m}" ${m===m0?"selected":""}>${m}</option>`).join("")}</select><b>分</b>`;})()}<input type="hidden" id="trTime" value="${esc(f.time||"")}"></div></div>
   <div class="tr-sec"><div class="tr-lab">担当</div><div class="chips">${staffList(false).map(s0=>`<button type="button" class="tg ${cur.includes(s0.id)?"on":""}" data-act="tgStaff" data-id="${s0.id}" aria-pressed="${cur.includes(s0.id)}">${esc(s0.name)}${off[s0.id]?"<small>休み</small>":""}</button>`).join("")}</div></div>
-  <div class="tr-sec"><div class="tr-lab">車 <span class="small">任意</span></div><div class="chips">${vehicles().map(v=>`<button type="button" class="tg ${car===v?"on":""}" data-act="trSel" data-g="car" data-v="${esc(v)}" aria-pressed="${car===v}">${esc(v)}</button>`).join("")}</div></div>
+  <div class="tr-sec"><div class="tr-lab">車 <span class="small">任意・担当の人数まで</span></div><div class="chips">${[...new Set(vehicles().concat(cl))].map(v=>`<button type="button" class="tg ${cl.includes(v)?"on":""}" data-act="tgCar" data-id="${esc(v)}" data-ord="${cl.indexOf(v)}" aria-pressed="${cl.includes(v)}">${esc(v)}</button>`).join("")}<button type="button" class="tg ${cl.length?"":"on"}" data-act="tgCar" data-id="" aria-pressed="${!cl.length}">なし</button></div></div>
   <label class="tr-sec"><span class="tr-lab">備考</span><textarea id="trNote" rows="2" maxlength="200">${esc(f.note||"")}</textarea></label>
   <div class="dlg-actions">${id?`<button class="btn danger left" data-act="delFree" data-id="${esc(id)}">削除</button>`:""}<button class="btn ghost" data-act="close">閉じる</button><button class="btn main" data-act="saveTr" data-id="${esc(id||"")}">保存</button></div>`,"dlg-tr");
   trSugUpd(!id);S.trOrig={id:id||"",time:f.time||"",from:ft.from,to:ft.to,st:trState()};}
 /* 入力中の状態（画面外タップで保存するかの判定用） */
-function trState(){return JSON.stringify([[...document.querySelectorAll('#trBk .tr-bk.on')].map(x=>x.dataset.v),trPlaceVal("fr"),trPlaceVal("to"),($("#trTime")||{}).value||"",[...document.querySelectorAll('#dlgBody .tg.on[data-act="tgStaff"]')].map(x=>x.dataset.id),(document.querySelector('#dlgBody [data-act="trSel"][data-g="car"].on')||{dataset:{}}).dataset.v||"",($("#trNote")||{}).value||"",($("#trPaxN")||{}).textContent||""]);}
+function trState(){return JSON.stringify([[...document.querySelectorAll('#trBk .tr-bk.on')].map(x=>x.dataset.v),trPlaceVal("fr"),trPlaceVal("to"),($("#trTime")||{}).value||"",[...document.querySelectorAll('#dlgBody .tg.on[data-act="tgStaff"]')].map(x=>x.dataset.id),selCars(99).join(CAR_SEP),($("#trNote")||{}).value||"",($("#trPaxN")||{}).textContent||""]);}
 function trPlaceVal(g){const b=document.querySelector(`#trPl_${g} .tr-pl.on`);if(!b)return"";return b.dataset.v==="その他"?($("#trOther_"+g).value||"").trim():b.dataset.v;}
 function trSugUpd(fillPax){const on=[...document.querySelectorAll('#trBk .tr-bk.on')];
   if(fillPax){const n=on.reduce((a,b)=>a+(Number(b.dataset.pax)||0),0);const e=$("#trPaxN");if(e)e.textContent=n;}
@@ -3683,7 +3690,7 @@ document.addEventListener("click",async ev=>{
       const time=(v=>{if(!v)return"";const[h,m]=v.split(":").map(Number);const t=Math.round((h*60+m)/10)*10;return pad(Math.floor(t/60)%24)+":"+pad(t%60);})($("#trTime").value);const bkEls=[...document.querySelectorAll('#trBk .tr-bk.on')];
       if(!bkEls.length){toast("予約者を選んでください");break;}if(!from){toast("迎えの場所を選んでください");break;}if(!to){toast("送りの場所を選んでください");break;}if(!time){toast("時間を選んでください");break;}
       const B=(S.day&&S.day.bookings)||{};const bks=bkEls.map(x=>x.dataset.v);const names=bks.map(b=>B[b]?dispName({id:b,...B[b]})+(Number(B[b].pax)||0)+"名":"");
-      const pax=Number($("#trPaxN").textContent)||0;const staff=[...document.querySelectorAll('#dlgBody .tg.on[data-act="tgStaff"]')].map(x=>x.dataset.id);const cb=document.querySelector('#dlgBody [data-act="trSel"][data-g="car"].on');const car=cb?cb.dataset.v:"";
+      const pax=Number($("#trPaxN").textContent)||0;const staff=[...document.querySelectorAll('#dlgBody .tg.on[data-act="tgStaff"]')].map(x=>x.dataset.id);const car=selCars(Math.max(1,staff.length)).join(CAR_SEP);
       const o=S.trOrig||{};const asNew=!!id&&(time!==o.time||from!==o.from||to!==o.to);
       const fid=(!id||asNew)?("t"+uid()):id;const rec={kind:"tr",time,from,to,dir:null,place:null,bks,names,pax,note:$("#trNote").value.trim(),deleted:false,by:S.me||""};rec.text=`迎え${from}→送り${to} `+bks.map(b=>B[b]?dispName({id:b,...B[b]}):"").join("・");
       try{await patchDay({free:{[fid]:rec},assign:{["fr_"+fid]:staff},cars:{["fr_"+fid]:car}});toast(asNew?"新しい送迎として追加しました（元の送迎はそのまま）":"保存しました");S.trOrig=null;closeDlg();}catch(err){}break;}
@@ -3704,12 +3711,19 @@ document.addEventListener("click",async ev=>{
     case"pickGrp":pickGrpDlg(el.dataset.key);break;
     case"addSizeRow":{const tb=$("#szBody");if(tb)tb.insertAdjacentHTML("beforeend",sizeRow({}));break;}
     case"assign":assignDlg(el.dataset.key,el.dataset.label,el.dataset.time,el.dataset.keys);break;
-    case"tgStaff":{const on=!el.classList.contains("on");el.classList.toggle("on",on);el.setAttribute("aria-pressed",on);break;}
-    case"tgCar":{document.querySelectorAll('.tg[data-act="tgCar"]').forEach(x=>{x.classList.remove("on");x.setAttribute("aria-pressed","false");});el.classList.add("on");el.setAttribute("aria-pressed","true");break;}
+    case"tgStaff":{const on=!el.classList.contains("on");el.classList.toggle("on",on);el.setAttribute("aria-pressed",on);carTrim();break;}
+    case"tgCar":{const all=[...document.querySelectorAll('.tg[data-act="tgCar"]')];const setOn=(x,v)=>{x.classList.toggle("on",v);x.setAttribute("aria-pressed",String(v));};
+      if(!el.dataset.id){all.forEach(x=>setOn(x,x===el));break;}
+      const nn=all.find(x=>!x.dataset.id);if(nn)setOn(nn,false);
+      if(el.classList.contains("on")){setOn(el,false);if(!all.some(x=>x.classList.contains("on"))&&nn)setOn(nn,true);break;}
+      setOn(el,true);el.dataset.ord=String(++carSeq);
+      const lim=carLimit(),on=all.filter(x=>x.dataset.id&&x.classList.contains("on")).sort((a,b)=>Number(a.dataset.ord)-Number(b.dataset.ord));
+      if(on.length>lim){on.slice(0,on.length-lim).forEach(x=>setOn(x,false));toast("車は担当の人数（"+lim+"台）までです");}
+      break;}
     case"saveAssign":{
       const key=el.dataset.key;const ids=[...document.querySelectorAll('.tg.on[data-act="tgStaff"]')].map(x=>x.dataset.id);
       const patch={assign:{[key]:ids}};(el.dataset.keys||"").split("|").filter(Boolean).forEach(k=>patch.assign[k]=ids);
-      if(needsCar(key)){const c=document.querySelector('.tg.on[data-act="tgCar"]');patch.cars={[key]:c?c.dataset.id:""};(el.dataset.keys||"").split("|").filter(Boolean).forEach(k=>{if(needsCar(k))patch.cars[k]=patch.cars[key];});}
+      if(needsCar(key)){patch.cars={[key]:selCars(Math.max(1,ids.length)).join(CAR_SEP)};(el.dataset.keys||"").split("|").filter(Boolean).forEach(k=>{if(needsCar(k))patch.cars[k]=patch.cars[key];});}
       try{await patchDay(patch);toast("更新しました");closeDlg();}catch(e){}break;}
     case"togglePlan":{S.openPlan=S.openPlan===id?"__none":id;render();const t=document.getElementById("pl-"+safeKey(id));if(t&&S.openPlan===id)t.scrollIntoView({block:"start",behavior:"smooth"});break;}
     case"addCar":{const inp=$("#newCar");const a=inp.value.trim();if(!a){inp.focus();return;}if(vehicles().includes(a)){toast("すでにあります");return;}
